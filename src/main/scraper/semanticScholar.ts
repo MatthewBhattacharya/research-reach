@@ -18,12 +18,19 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
+// In-memory cache: name -> { result, timestamp }
+const cache = new Map<string, { result: SemanticScholarResult; ts: number }>()
+const CACHE_TTL = 30 * 60 * 1000 // 30 minutes
+
 export class SemanticScholarScraper {
-  private async fetchWithRetry(url: string, retries = 3): Promise<any | null> {
+  private async fetchWithRetry(url: string, retries = 4): Promise<any | null> {
     for (let attempt = 0; attempt < retries; attempt++) {
       if (attempt > 0) {
-        const delay = 2000 * Math.pow(2, attempt) + Math.random() * 1000
-        logger.info(`Semantic Scholar rate-limited, retrying in ${Math.round(delay / 1000)}s (attempt ${attempt + 1}/${retries})`)
+        // Longer backoff: 5s, 15s, 45s
+        const delay = 5000 * Math.pow(3, attempt - 1) + Math.random() * 2000
+        logger.info(
+          `Semantic Scholar rate-limited, retrying in ${Math.round(delay / 1000)}s (attempt ${attempt + 1}/${retries})`
+        )
         await sleep(delay)
       }
 
@@ -50,6 +57,14 @@ export class SemanticScholarScraper {
   }
 
   async searchByName(name: string): Promise<SemanticScholarResult> {
+    // Check cache first
+    const cacheKey = name.toLowerCase().trim()
+    const cached = cache.get(cacheKey)
+    if (cached && Date.now() - cached.ts < CACHE_TTL) {
+      logger.info(`Semantic Scholar cache hit for: ${name} (${cached.result.papers.length} papers)`)
+      return cached.result
+    }
+
     logger.info(`Searching Semantic Scholar for author: ${name}`)
     const result: SemanticScholarResult = { papers: [] }
 
@@ -61,14 +76,13 @@ export class SemanticScholarScraper {
     }
 
     // Extract name parts for matching (ignore short parts like initials)
-    const nameLower = normalizedName.toLowerCase()
-    const nameParts = nameLower
+    const nameParts = normalizedName
+      .toLowerCase()
       .replace(/[^a-z\s]/g, '')
       .split(/\s+/)
       .filter((p) => p.length > 2)
 
     try {
-      // Search for papers mentioning this person
       const query = encodeURIComponent(`"${normalizedName}"`)
       const data = await this.fetchWithRetry(
         `${API_BASE}/paper/search?query=${query}&fields=title,authors,year,url,citationCount,abstract,externalIds&limit=40`
@@ -86,7 +100,9 @@ export class SemanticScholarScraper {
 
         if (isAuthor) {
           const doi = paper.externalIds?.DOI
-          const paperUrl = doi ? `https://doi.org/${doi}` : paper.url || undefined
+          const paperUrl = doi
+            ? `https://doi.org/${doi}`
+            : paper.url || undefined
 
           result.papers.push({
             title: paper.title,
@@ -105,7 +121,12 @@ export class SemanticScholarScraper {
       logger.warn('Semantic Scholar search failed', error)
     }
 
-    logger.info(`Found ${result.papers.length} papers on Semantic Scholar for ${name}`)
+    // Cache the result (even if empty, to avoid re-hitting a rate limit)
+    cache.set(cacheKey, { result, ts: Date.now() })
+
+    logger.info(
+      `Found ${result.papers.length} papers on Semantic Scholar for ${name}`
+    )
     return result
   }
 }
