@@ -6,6 +6,7 @@ import { getAIProvider } from '../services/ai'
 import { DepartmentScraper } from '../scraper/department'
 import { ProfessorScraper } from '../scraper/professor'
 import { ScholarScraper } from '../scraper/scholar'
+import { SemanticScholarScraper } from '../scraper/semanticScholar'
 import { logger } from '../utils/logger'
 import { openExternal } from '../utils/openExternal'
 import { readFileSync } from 'fs'
@@ -109,6 +110,21 @@ function registerProfessorHandlers(): void {
         .where(eq(schema.professors.id, id))
       return results[0]
     }
+
+    // Deduplicate: check if a professor with the same name already exists for this search
+    if (data.searchId && data.name) {
+      const existing = await db
+        .select()
+        .from(schema.professors)
+        .where(eq(schema.professors.searchId, data.searchId))
+      const duplicate = existing.find(
+        (p) => p.name.toLowerCase().trim() === data.name.toLowerCase().trim()
+      )
+      if (duplicate) {
+        return duplicate
+      }
+    }
+
     const result = await db.insert(schema.professors).values(data).returning()
     return result[0]
   })
@@ -265,6 +281,19 @@ function registerSettingsHandlers(): void {
   })
 }
 
+function extractAIError(error: unknown): string {
+  if (error && typeof error === 'object') {
+    const err = error as any
+    // Anthropic SDK error
+    if (err.error?.error?.message) return err.error.error.message
+    // OpenAI SDK error
+    if (err.error?.message) return err.error.message
+    // Generic
+    if (err.message) return err.message
+  }
+  return String(error)
+}
+
 function registerAIHandlers(): void {
   ipcMain.handle('ai:generateEmail', async (_event, context) => {
     try {
@@ -273,7 +302,7 @@ function registerAIHandlers(): void {
       return { success: true, data: result }
     } catch (error) {
       logger.error('AI email generation failed', error)
-      return { success: false, error: String(error) }
+      return { success: false, error: extractAIError(error) }
     }
   })
 
@@ -284,7 +313,7 @@ function registerAIHandlers(): void {
       return { success: true, data: result }
     } catch (error) {
       logger.error('AI paper summarization failed', error)
-      return { success: false, error: String(error) }
+      return { success: false, error: extractAIError(error) }
     }
   })
 
@@ -324,13 +353,25 @@ function registerScraperHandlers(): void {
   })
 
   ipcMain.handle('scraper:googleScholar', async (_event, name: string) => {
+    // Try Semantic Scholar first (free API, no rate limits)
+    try {
+      const ssScraper = new SemanticScholarScraper()
+      const ssResult = await ssScraper.searchByName(name)
+      if (ssResult.papers.length > 0) {
+        return { success: true, data: ssResult }
+      }
+    } catch (error) {
+      logger.warn('Semantic Scholar failed, trying Google Scholar', error)
+    }
+
+    // Fallback to Google Scholar
     try {
       const scraper = new ScholarScraper()
       const result = await scraper.searchByName(name)
       return { success: true, data: result }
     } catch (error) {
-      logger.error('Google Scholar scraping failed', error)
-      return { success: false, error: String(error) }
+      logger.error('All paper search methods failed', error)
+      return { success: false, error: 'Could not find papers. Google Scholar may be rate-limiting requests.' }
     }
   })
 }

@@ -38,7 +38,7 @@ export function EmailComposerPage() {
   const [selectedPaperIds, setSelectedPaperIds] = useState<Set<number>>(new Set())
   const [saved, setSaved] = useState(false)
   const [copied, setCopied] = useState(false)
-  const [noApiKey, setNoApiKey] = useState(false)
+  const [aiError, setAiError] = useState<string | null>(null)
 
   useEffect(() => {
     fetchProfile()
@@ -104,8 +104,10 @@ export function EmailComposerPage() {
 
     if (result) {
       setBody(result)
+      setAiError(null)
     } else {
-      setNoApiKey(true)
+      const { error } = useEmailStore.getState()
+      setAiError(error || 'AI generation failed. Check your API key in Settings.')
     }
   }
 
@@ -142,19 +144,19 @@ export function EmailComposerPage() {
         backTo={`/professor/${pid}`}
       />
 
-      {noApiKey && (
-        <div className="card p-4 mb-4 flex items-center gap-3 bg-yellow-50 border-yellow-200">
-          <AlertCircle className="h-5 w-5 text-yellow-600" />
-          <span className="text-sm text-yellow-700">
-            AI generation failed. Make sure you've added your API key in{' '}
+      {aiError && (
+        <div className="card p-4 mb-4 flex items-start gap-3 bg-yellow-50 border-yellow-200">
+          <AlertCircle className="h-5 w-5 text-yellow-600 shrink-0 mt-0.5" />
+          <div className="text-sm text-yellow-700">
+            <p className="font-medium">AI generation failed</p>
+            <p className="mt-1">{aiError}</p>
             <button
               onClick={() => navigate('/settings')}
-              className="underline font-medium"
+              className="underline font-medium mt-1"
             >
-              Settings
+              Go to Settings
             </button>
-            .
-          </span>
+          </div>
         </div>
       )}
 
