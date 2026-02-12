@@ -1,4 +1,4 @@
-import { ipcMain, dialog, shell } from 'electron'
+import { ipcMain, dialog } from 'electron'
 import { eq } from 'drizzle-orm'
 import { getDb } from '../db'
 import * as schema from '../db/schema'
@@ -7,6 +7,7 @@ import { DepartmentScraper } from '../scraper/department'
 import { ProfessorScraper } from '../scraper/professor'
 import { ScholarScraper } from '../scraper/scholar'
 import { logger } from '../utils/logger'
+import { openExternal } from '../utils/openExternal'
 import { readFileSync } from 'fs'
 
 export function registerIpcHandlers(): void {
@@ -336,7 +337,7 @@ function registerScraperHandlers(): void {
 
 function registerAppHandlers(): void {
   ipcMain.handle('app:openExternal', async (_event, url: string) => {
-    await shell.openExternal(url)
+    await openExternal(url)
     return { success: true }
   })
 

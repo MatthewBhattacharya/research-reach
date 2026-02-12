@@ -1,8 +1,9 @@
-import { app, BrowserWindow, shell } from 'electron'
+import { app, BrowserWindow } from 'electron'
 import { join } from 'path'
 import { getDb } from './db'
 import { registerIpcHandlers } from './ipc/handlers'
 import { logger } from './utils/logger'
+import { openExternal } from './utils/openExternal'
 
 let mainWindow: BrowserWindow | null = null
 
@@ -28,7 +29,7 @@ function createWindow(): void {
   })
 
   mainWindow.webContents.setWindowOpenHandler((details) => {
-    shell.openExternal(details.url)
+    openExternal(details.url)
     return { action: 'deny' }
   })
 
