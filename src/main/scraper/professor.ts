@@ -79,20 +79,78 @@ export class ProfessorScraper {
       }
     }
 
-    // Extract email
+    // Extract email — collect all candidates and pick the best one
+    const emailCandidates: string[] = []
+
+    // Gather mailto: links
     $('a[href^="mailto:"]').each((_i, el) => {
-      if (!result.email) {
-        const href = $(el).attr('href') || ''
-        result.email = href.replace('mailto:', '').split('?')[0].trim()
+      const href = $(el).attr('href') || ''
+      const addr = href.replace('mailto:', '').split('?')[0].trim().toLowerCase()
+      if (addr && addr.includes('@')) {
+        emailCandidates.push(addr)
       }
     })
 
-    // Also check text content for email patterns
-    if (!result.email) {
-      const bodyText = $('body').text()
-      const emailMatch = bodyText.match(/[\w.-]+@[\w.-]+\.\w{2,}/)?.[0]
-      if (emailMatch && !emailMatch.includes('example.com')) {
-        result.email = emailMatch
+    // Gather emails from text content
+    const bodyText = $('body').text()
+    const textEmails = bodyText.match(/[\w.-]+@[\w.-]+\.\w{2,}/g) || []
+    for (const addr of textEmails) {
+      const lower = addr.toLowerCase()
+      if (!emailCandidates.includes(lower)) {
+        emailCandidates.push(lower)
+      }
+    }
+
+    // Score candidates: prefer personal emails over generic/department ones
+    const genericPrefixes = [
+      'info', 'admin', 'office', 'help', 'support', 'contact', 'webmaster',
+      'web', 'dept', 'department', 'general', 'enquiries', 'inquiries',
+      'reception', 'secretary', 'mail', 'noreply', 'no-reply',
+      'admissions', 'gradadmissions', 'building', 'hr', 'registrar',
+      'feedback', 'press', 'media', 'communications', 'safety'
+    ]
+
+    function scoreEmail(addr: string, profName?: string): number {
+      let score = 0
+      const local = addr.split('@')[0]
+      const domain = addr.split('@')[1] || ''
+
+      // Penalize generic prefixes heavily
+      if (genericPrefixes.some((p) => local.startsWith(p))) score -= 50
+      // Penalize addresses with "help", "web", "admin" anywhere
+      if (/help|web_help|admin|office|support/.test(local)) score -= 40
+
+      // Boost if domain is .edu
+      if (domain.endsWith('.edu')) score += 5
+
+      // Boost if the local part contains parts of the professor's name
+      if (profName) {
+        const nameParts = profName
+          .toLowerCase()
+          .replace(/[^a-z\s]/g, '')
+          .split(/\s+/)
+          .filter((p) => p.length > 2)
+        for (const part of nameParts) {
+          if (local.includes(part)) score += 15
+        }
+      }
+
+      // Penalize example/placeholder addresses
+      if (domain.includes('example.com') || domain.includes('test.com')) score -= 100
+
+      return score
+    }
+
+    if (emailCandidates.length > 0) {
+      // Score and sort, pick best
+      const scored = emailCandidates.map((addr) => ({
+        addr,
+        score: scoreEmail(addr, result.name)
+      }))
+      scored.sort((a, b) => b.score - a.score)
+      // Only use the email if it scores above 0 (likely personal, not generic)
+      if (scored[0].score > 0) {
+        result.email = scored[0].addr
       }
     }
 

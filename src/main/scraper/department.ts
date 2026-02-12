@@ -12,6 +12,43 @@ export interface DepartmentResult {
   departmentName?: string
 }
 
+// Words that indicate a nav/category link rather than a person's name
+const NAV_PATTERNS = [
+  /^(all\s)?people$/i, /^faculty$/i, /^staff$/i, /^students$/i,
+  /^professors?$/i, /^associate\s+professors?$/i, /^assistant\s+professors?$/i,
+  /^emerit[ia]\s+professors?$/i, /^visiting\s+professors?$/i,
+  /^instructors?$/i, /^postdocs?$/i, /^researchers?$/i,
+  /^visitors?\s*[&+]\s*affiliates?$/i, /^graduate\s+students?$/i,
+  /^directory$/i, /^home$/i, /^contact$/i, /^about$/i, /^back$/i,
+  /^overview$/i, /^search$/i, /^news$/i, /^events$/i, /^admissions$/i,
+  /^programs?$/i, /^courses?$/i, /^seminars?$/i, /^resources?$/i,
+  /^department/i, /^administration$/i, /^leadership$/i
+]
+
+function isNavLink(text: string): boolean {
+  const trimmed = text.trim()
+  if (NAV_PATTERNS.some((p) => p.test(trimmed))) return true
+  // Single word names are almost never real people (except rare mononyms)
+  if (!trimmed.includes(' ') && !trimmed.includes(',')) return true
+  return false
+}
+
+// Heuristic: text looks like a person's name (e.g. "Last, First" or "First Last")
+function looksLikePersonName(text: string): boolean {
+  const trimmed = text.trim()
+  if (trimmed.length < 4 || trimmed.length > 80) return false
+  if (isNavLink(trimmed)) return false
+  // Must contain at least one space or comma (first + last name)
+  if (!trimmed.includes(' ') && !trimmed.includes(',')) return false
+  // Should start with a letter
+  if (!/^[A-Za-zÀ-ÿ]/.test(trimmed)) return false
+  // Should not be mostly lowercase words that look like a nav item
+  // A name typically has at least 2 capitalized words or a "Last, First" pattern
+  const hasComma = /^[A-Za-zÀ-ÿ'-]+,\s+[A-Za-zÀ-ÿ]/.test(trimmed)
+  const capWords = trimmed.split(/\s+/).filter((w) => /^[A-ZÀ-Ý]/.test(w)).length
+  return hasComma || capWords >= 2
+}
+
 export class DepartmentScraper {
   private async fetchPage(url: string): Promise<string> {
     const response = await fetch(url, {
@@ -77,7 +114,7 @@ export class DepartmentScraper {
             $el.find('h2, h3, h4, .name, .title').first().text().trim()
           let href = link.attr('href') || ''
 
-          if (name && name.length > 2 && name.length < 100) {
+          if (name && looksLikePersonName(name)) {
             if (href && !href.startsWith('http')) {
               href = new URL(href, baseUrl.origin).toString()
             }
@@ -127,14 +164,7 @@ export class DepartmentScraper {
           href.includes('/directory/') ||
           href.includes('/staff/')
 
-        if (
-          isProfileLink &&
-          text.length > 3 &&
-          text.length < 80 &&
-          !text.includes('Home') &&
-          !text.includes('Contact') &&
-          !text.includes('Back')
-        ) {
+        if (isProfileLink && looksLikePersonName(text)) {
           const fullUrl = href.startsWith('http')
             ? href
             : new URL(href, baseUrl.origin).toString()
